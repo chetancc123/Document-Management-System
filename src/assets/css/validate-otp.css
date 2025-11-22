@@ -1,0 +1,37 @@
+/* src/pages/validate-otp.css */
+.otp-page {
+    min-height: 88vh;
+    padding-top: 36px;
+    padding-bottom: 36px;
+    background: #f4f8fb; /* light page background */
+  }
+  
+  .otp-card {
+    width: 520px;
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  
+  .otp-logo {
+    height: 84px;
+    object-fit: contain;
+    display: block;
+    margin-left: auto;
+    margin-right: auto;
+  }
+  
+  .otp-input {
+    letter-spacing: 6px;
+    font-size: 1.1rem;
+    font-weight: 600;
+  }
+  
+  /* smaller screens */
+  @media (max-width: 576px) {
+    .otp-card {
+      width: calc(100% - 32px);
+      margin: 0 16px;
+    }
+    .otp-logo { height: 64px; }
+  }
+  
