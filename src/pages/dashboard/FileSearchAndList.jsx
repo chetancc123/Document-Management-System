@@ -327,6 +327,7 @@ export default function FileSearchAndList() {
             <div className="col-12 d-flex justify-content-end gap-2">
               <button className="btn btn-sm btn-primary" onClick={onSearchSubmit}>Search</button>
               <button className="btn btn-sm btn-outline-secondary" onClick={handleRefresh}>Refresh</button>
+              <button className="btn btn-sm btn-outline-success" onClick={handleDownloadAllAsZip}>Download All as ZIP</button>
             </div>
           </div>
 
