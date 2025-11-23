@@ -1,6 +1,9 @@
 // src/pages/dashboard/DashboardShell.jsx
 import React from "react";
-import { Link, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import "../../assets/css/dashboard-shell.css"; // correct based on your project
+
+import logoUrl from "../../assets/images/pngegg.png";
 
 export default function DashboardShell() {
   const navigate = useNavigate();
@@ -10,51 +13,65 @@ export default function DashboardShell() {
     navigate("/login");
   };
 
-  // path to your uploaded screenshot (assignment) - developer-provided local path:
-  const screenshotUrl = "/mnt/data/061d7a53-d89a-48dc-9db1-656e7528e2da.png";
-
   return (
-    <div className="d-flex" style={{ minHeight: "100vh" }}>
+    <div className="d-flex dashboard-root">
       {/* Sidebar */}
-      <div className="bg-light border-end" style={{ width: 240 }}>
-        <div className="p-3">
-          <h5 className="mb-3">DocMgmt Admin</h5>
-          <ul className="nav flex-column">
-            <li className="nav-item"><Link className="nav-link" to="/dashboard">Overview</Link></li>
-            <li className="nav-item"><Link className="nav-link" to="/dashboard/create-user">Create User</Link></li>
-            {/* add more links here */}
-          </ul>
+      <aside className="sidebar p-3 d-flex flex-column align-items-stretch">
+        <div className="sidebar-brand text-center mb-3">
+          <img src={logoUrl} alt="Logo" className="brand-logo" />
+          <div className="brand-text">DocMgmt Admin</div>
         </div>
-      </div>
 
-      {/* Main */}
-      <div className="flex-grow-1">
-        <nav className="navbar navbar-expand navbar-white bg-white border-bottom">
-          <div className="container-fluid">
-            <span className="navbar-brand">Admin Dashboard</span>
-            <div className="d-flex align-items-center">
-              <button className="btn btn-outline-secondary btn-sm me-2" onClick={logout}>Logout</button>
-            </div>
-          </div>
+        <nav className="nav flex-column gap-2">
+          {/* Documents FIRST */}
+          <NavLink
+            to="/dashboard/documents"
+            className={({ isActive }) =>
+              `btn sidebar-btn text-start ${isActive ? "active" : "btn-light"}`
+            }
+          >
+            Documents
+          </NavLink>
+
+          <NavLink
+            to="/dashboard/upload"
+            className={({ isActive }) =>
+              `btn sidebar-btn text-start ${isActive ? "active" : "btn-light"}`
+            }
+          >
+            Upload Document
+          </NavLink>
+
+          <NavLink
+            to="/dashboard/create-user"
+            className={({ isActive }) =>
+              `btn sidebar-btn text-start ${isActive ? "active" : "btn-light"}`
+            }
+          >
+            Create User
+          </NavLink>
         </nav>
 
-        <main className="p-4">
-          <div className="container-fluid">
-            <Outlet />
-            <div className="mt-4">
-              <h6>Assignment screenshot (API test)</h6>
-              <div className="card" style={{ maxWidth: 700 }}>
-                <img
-                  src={screenshotUrl}
-                  alt="API screenshot"
-                  style={{ width: "100%", objectFit: "cover" }}
-                />
-                <div className="card-body">
-                  <small className="text-muted">Screenshot: generateOTP response showing "not registered".</small>
-                </div>
-              </div>
-            </div>
+        <div className="mt-auto">
+          {/* empty spacer */}
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div className="flex-grow-1 main-area">
+        <header className="header-bar">
+          <div className="container-fluid d-flex align-items-center justify-content-between">
+            <h5 className="mb-0 header-title">Admin Dashboard</h5>
+
+            {/* Logout Button - RED (top right) */}
+            <button className="btn btn-danger btn-sm" onClick={logout}>
+              Logout
+            </button>
           </div>
+        </header>
+
+        <main className="p-4">
+          <Outlet />
         </main>
       </div>
     </div>

@@ -7,6 +7,7 @@ import DashboardShell from "./pages/dashboard/DashboardShell";
 import AdminCreateUser from "./pages/dashboard/AdminCreateUser";
 import ProtectedRoute from "./components/ProtectedRoute";
 import ValidateOtpStyled from "./pages/ValidateOtpStyled";
+import FileSearchAndList from "./pages/dashboard/FileSearchAndList";
 
 export default function App() {
   return (
@@ -27,6 +28,8 @@ export default function App() {
         >
           <Route index element={<div className="p-3">Welcome to Admin Dashboard</div>} />
           <Route path="create-user" element={<AdminCreateUser />} />
+          <Route path="documents" element={<FileSearchAndList />} />
+
           {/* add other dashboard routes here */}
         </Route>
 
