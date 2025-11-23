@@ -1,62 +1,46 @@
-// src/pages/dashboard/FileUpload.jsx
 import React, { useEffect, useState, useRef } from "react";
 import api from "../../api/api";
 
-/**
- * FileUpload component updated to use Postman API shapes:
- * - POST /saveDocumentEntry (multipart/form-data) with fields:
- *    file (file) and data (stringified JSON)
- * - POST /documentTags  (body: { term: "" }) to fetch tags
- * - Uses header 'token' (value from localStorage 'dms_token') as required by Postman
- *
- * Drop this file into: src/pages/dashboard/FileUpload.jsx
- */
+const DEMO_PREVIEW = "/mnt/data/699753e4-dbbd-4376-8f5b-242eb1fc77a3.png";
 
 export default function FileUpload() {
-  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10)); // YYYY-MM-DD
+  const [date, setDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [major, setMajor] = useState("Personal");
   const [minorOptions, setMinorOptions] = useState([]);
   const [minor, setMinor] = useState("");
-  const [tags, setTags] = useState([]);
+  const [tags, setTags] = useState([]); 
   const [availableTags, setAvailableTags] = useState([]);
   const [tagInput, setTagInput] = useState("");
   const [remarks, setRemarks] = useState("");
   const [file, setFile] = useState(null);
-  const [filePreviewUrl, setFilePreviewUrl] = useState("");
+  const [filePreviewUrl, setFilePreviewUrl] = useState(DEMO_PREVIEW);
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
   const [message, setMessage] = useState(null);
   const tagInputRef = useRef();
 
-  // set initial minor options (fallback)
   useEffect(() => {
     loadMinorOptions(major);
-    fetchTags(""); // fetch all tags (empty term)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    fetchTags("");
+    return () => {
+      if (file && file.preview) URL.revokeObjectURL(file.preview);
+    };
   }, []);
 
-  // Get token from localStorage (set by Validate OTP)
   const getToken = () => localStorage.getItem("dms_token") || "";
 
-  // Fetch tags from /documentTags (Postman uses POST with { term: "" })
   const fetchTags = async (term = "") => {
     try {
       const token = getToken();
-      const res = await api.post(
-        "/documentTags",
-        { term },
-        { headers: { token } }
-      );
-      // response shape in Postman unknown; try to read sensible paths
+      const res = await api.post("/documentTags", { term }, { headers: { token } });
       const data = res?.data?.data || res?.data || [];
-      setAvailableTags(Array.isArray(data) ? data.map(t => (t.tag_name ?? t)) : []);
+      setAvailableTags(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("fetchTags err:", err);
-      setAvailableTags([]); // fallback
+      setAvailableTags([]);
     }
   };
 
-  // Load minor options (no API in Postman for minor-heads; using fallback lists)
   const loadMinorOptions = (selectedMajor) => {
     setMinor("");
     if (selectedMajor === "Personal") {
@@ -76,32 +60,34 @@ export default function FileUpload() {
     loadMinorOptions(val);
   };
 
-  // Tag handling: add tag (keeps tag_name shape for later data)
-  const addTag = (t) => {
+  const addTag = (value) => {
+    const t = String(value || "").trim();
     if (!t) return;
-    const norm = t.trim();
-    if (!norm) return;
-    if (!tags.includes(norm)) setTags(prev => [...prev, norm]);
+    if (tags.includes(t)) {
+      setTagInput("");
+      return;
+    }
+    setTags((prev) => [...prev, t]);
     setTagInput("");
-    // optionally refresh available tags
-    fetchTags("");
   };
-  const removeTag = (t) => setTags(prev => prev.filter(x => x !== t));
+
+  const removeTag = (t) => setTags((prev) => prev.filter((x) => x !== t));
 
   const onTagKeyDown = (e) => {
     if (e.key === "Enter" || e.key === "Tab" || e.key === ",") {
       e.preventDefault();
       if (tagInput.trim()) addTag(tagInput);
     } else if (e.key === "Backspace" && !tagInput) {
-      setTags(prev => prev.slice(0, -1));
+      setTags((prev) => prev.slice(0, -1));
     }
   };
 
+  // File handling
   const onFileChange = (e) => {
     setMessage(null);
     const f = e.target.files[0];
     if (!f) return;
-    // validate type
+
     if (!f.type.match("image/") && f.type !== "application/pdf") {
       setMessage({ type: "danger", text: "Only images and PDF files are allowed." });
       e.target.value = null;
@@ -113,6 +99,7 @@ export default function FileUpload() {
       e.target.value = null;
       return;
     }
+
     if (f.type.match("image/")) {
       const preview = URL.createObjectURL(f);
       setFilePreviewUrl(preview);
@@ -123,7 +110,13 @@ export default function FileUpload() {
     }
   };
 
-  // Build the `data` JSON string expected by the API and post as form-data
+  const convertToDDMMYYYY = (isoDate) => {
+    if (!isoDate) return "";
+    if (isoDate.includes("-") && isoDate.split("-")[0].length === 2) return isoDate;
+    const [yyyy, mm, dd] = isoDate.split("-");
+    return `${dd}-${mm}-${yyyy}`;
+  };
+
   const handleUpload = async (e) => {
     e?.preventDefault();
     setMessage(null);
@@ -137,18 +130,17 @@ export default function FileUpload() {
       return;
     }
 
-    // Build tags array as objects { tag_name: "..." } as Postman shows
-    const tagsPayload = tags.map(t => ({ tag_name: t }));
+    const tagsPayload = tags.map((t) => ({ tag_name: t }));
 
-    // Build data object exactly like Postman example
     const dataObj = {
-      major_head: major,                        // e.g., "Personal" or "Professional" or "Company"
-      minor_head: minor,                        // selected name/department
-      document_date: date,                      // format YYYY-MM-DD (server may accept)
+      major_head: major,
+      minor_head: minor,
+      document_date: convertToDDMMYYYY(date),
       document_remarks: remarks,
       tags: tagsPayload,
-      user_id: localStorage.getItem("user_id") || "unknown" // change if you store user id differently
+      user_id: localStorage.getItem("user_id") || "nitin",
     };
+
 
     const form = new FormData();
     form.append("file", file);
@@ -161,8 +153,7 @@ export default function FileUpload() {
 
       const res = await api.post("/saveDocumentEntry", form, {
         headers: {
-          "Content-Type": "multipart/form-data",
-          token, // Postman expects header key 'token'
+          token,
         },
         onUploadProgress: (ev) => {
           if (ev.total) {
@@ -172,23 +163,21 @@ export default function FileUpload() {
         },
       });
 
-      // inspect response
       if (res?.data?.status === false) {
-        setMessage({ type: "danger", text: res.data.data || "Upload failed." });
+        setMessage({ type: "danger", text: res.data.data || res.data.message || "Upload failed." });
       } else {
         setMessage({ type: "success", text: res?.data?.data || "Uploaded successfully." });
-        // reset a few things
         setDate(new Date().toISOString().slice(0, 10));
         setMajor("Personal");
         loadMinorOptions("Personal");
         setTags([]);
         setRemarks("");
         setFile(null);
-        setFilePreviewUrl("");
+        setFilePreviewUrl(DEMO_PREVIEW);
       }
     } catch (err) {
       console.error("upload err:", err);
-      const txt = err?.response?.data?.data || err?.message || "Upload failed.";
+      const txt = err?.response?.data?.data || err?.response?.data?.message || err?.message || "Upload failed.";
       setMessage({ type: "danger", text: txt });
     } finally {
       setUploading(false);
@@ -244,9 +233,10 @@ export default function FileUpload() {
               <div className="col-12">
                 <label className="form-label">Tags</label>
                 <div className="mb-2">
-                  {tags.map(t => (
+                  {tags.map((t) => (
                     <span key={t} className="badge bg-primary me-2">
-                      {t} <span style={{ cursor: "pointer", marginLeft: 6 }} onClick={() => removeTag(t)}>&times;</span>
+                      {t}{" "}
+                      <span style={{ cursor: "pointer", marginLeft: 6 }} onClick={() => removeTag(t)}>&times;</span>
                     </span>
                   ))}
                 </div>
@@ -263,7 +253,7 @@ export default function FileUpload() {
                 />
                 <datalist id="available-tags">
                   {availableTags.map((t) => (
-                    <option key={t} value={t} />
+                    <option key={t.id || t.label} value={t.label} />
                   ))}
                 </datalist>
                 <div className="form-text">Existing tags are suggested. New tags will be included in upload.</div>
@@ -289,9 +279,13 @@ export default function FileUpload() {
 
               <div className="col-md-4 d-flex align-items-center justify-content-center">
                 {filePreviewUrl ? (
-                  <img src={filePreviewUrl} alt="preview" style={{ maxWidth: 160, maxHeight: 120 }} />
-                ) : file && file.name ? (
-                  <div className="text-center small">{file.name}</div>
+                  file && file.type && file.type.match("image/") ? (
+                    <img src={filePreviewUrl} alt="preview" style={{ maxWidth: 160, maxHeight: 120 }} />
+                  ) : file && file.name ? (
+                    <div className="text-center small">{file.name}</div>
+                  ) : (
+                    <img src={filePreviewUrl} alt="example" style={{ maxWidth: 160, maxHeight: 120 }} />
+                  )
                 ) : (
                   <div className="text-muted small">No preview</div>
                 )}

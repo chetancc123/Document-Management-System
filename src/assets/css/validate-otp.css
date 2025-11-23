@@ -1,9 +1,9 @@
-/* src/pages/validate-otp.css */
+
 .otp-page {
     min-height: 88vh;
     padding-top: 36px;
     padding-bottom: 36px;
-    background: #f4f8fb; /* light page background */
+    background: #f4f8fb;
   }
   
   .otp-card {
@@ -26,7 +26,6 @@
     font-weight: 600;
   }
   
-  /* smaller screens */
   @media (max-width: 576px) {
     .otp-card {
       width: calc(100% - 32px);

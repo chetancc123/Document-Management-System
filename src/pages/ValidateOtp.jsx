@@ -1,4 +1,3 @@
-// src/pages/ValidateOtp.jsx
 import React, { useState, useEffect } from "react";
 import api from "../api/api";
 import { useNavigate, useLocation } from "react-router-dom";
@@ -26,8 +25,8 @@ export default function ValidateOtp() {
 
     try {
       setLoading(true);
-      const res = await api.post("/validateOTP", { mobile_number: mobile, otp }); // match Postman path
-      // adapt token extraction depending on real response
+      const res = await api.post("/validateOTP", { mobile_number: mobile, otp });
+      
       const token = res?.data?.token || res?.data?.data?.token || res?.data?.data?.authToken;
       if (!token) {
         setMsg({ type: "danger", text: res?.data?.data || "Token not returned." });

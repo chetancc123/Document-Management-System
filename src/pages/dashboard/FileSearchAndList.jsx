@@ -1,52 +1,40 @@
-// src/pages/dashboard/FileSearchAndList.jsx
 import React, { useEffect, useState } from "react";
 import api from "../../api/api";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
-/**
- * FileSearchAndList
- * - Search form: major/minor, tags (comma sep), from/to date, free text
- * - Uses POST /searchDocumentEntry (body as required by your API) with header `token`
- * - Shows results in table with View / Download buttons
- * - Preview modal (images & PDFs). For demo, uses fallback local image path if file URL is missing:
- *     /mnt/data/699753e4-dbbd-4376-8f5b-242eb1fc77a3.png
- */
 
 export default function FileSearchAndList() {
   const [filters, setFilters] = useState({
     major_head: "",
     minor_head: "",
+    tagsText: "",
     from_date: "",
     to_date: "",
-    tagsText: "", // user enters comma-separated tags
     searchText: ""
   });
 
-  const [rows, setRows] = useState([]);
+  const [allRows, setAllRows] = useState([]);
+  const [pageRows, setPageRows] = useState([]);
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState({ open: false, url: "", type: "" });
   const [message, setMessage] = useState(null);
-  const [pageStart, setPageStart] = useState(0);
-  const [pageLength] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
 
-  // fallback demo image (developer-provided local path)
+  const PAGE_SIZE = 10;
   const DEMO_FALLBACK = "/mnt/data/699753e4-dbbd-4376-8f5b-242eb1fc77a3.png";
-
-  useEffect(() => {
-    // initial load
-    fetchDocs();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const token = localStorage.getItem("dms_token") || "";
 
-  function buildBody(start = pageStart, length = pageLength) {
-    const tagNames = filters.tagsText
+  useEffect(() => {
+    fetchDocsAll();
+  }, []);
+
+  function buildBodyForAll() {
+    const tagNames = (filters.tagsText || "")
       .split(",")
-      .map(t => t.trim())
+      .map((t) => t.trim())
       .filter(Boolean)
-      .map(t => ({ tag_name: t }));
+      .map((t) => ({ tag_name: t }));
 
     return {
       major_head: filters.major_head || "",
@@ -55,77 +43,177 @@ export default function FileSearchAndList() {
       to_date: filters.to_date || "",
       tags: tagNames,
       uploaded_by: "",
-      start,
-      length,
+      start: 0,
+      length: 1000000,
       filterId: "",
       search: { value: filters.searchText || "" }
     };
   }
 
-  const fetchDocs = async (start = 0, length = pageLength) => {
+  const fetchDocsAll = async () => {
     setLoading(true);
     setMessage(null);
     try {
-      const body = buildBody(start, length);
+      const body = buildBodyForAll();
       const res = await api.post("/searchDocumentEntry", body, { headers: { token } });
       const data = res?.data;
-      // Common shapes -> try to read rows
       const rowsFromServer = data?.data?.data || data?.data || data?.rows || data?.documents || [];
-      setRows(Array.isArray(rowsFromServer) ? rowsFromServer : []);
+      const arr = Array.isArray(rowsFromServer) ? rowsFromServer : [];
+
+      const sorted = arr.slice().sort((a, b) => parsePossibleDate(b) - parsePossibleDate(a));
+      setAllRows(sorted);
+
+      setCurrentPage(1);
+      setPageRows(sorted.slice(0, PAGE_SIZE));
     } catch (err) {
-      console.error("search error", err);
-      setMessage({ type: "danger", text: err?.response?.data?.data || err?.message || "Search failed." });
+      console.error("fetchDocs err:", err);
+      setMessage({ type: "danger", text: err?.response?.data?.data || err?.message || "Failed to fetch documents." });
+      setAllRows([]);
+      setPageRows([]);
     } finally {
       setLoading(false);
     }
   };
 
-  // fetch single file as blob (authenticated) and return blob URL
-  const fetchFileBlobUrl = async (fileUrlOrPath, fallbackName = "file") => {
-    try {
-      // If fileUrlOrPath is missing, use demo fallback local path
-      const url = fileUrlOrPath || DEMO_FALLBACK;
+  const parsePossibleDate = (row) => {
+    const raw = row.document_date || row.documentDate || row.created_at || row.createdAt || row.date || "";
+    if (!raw) return 0;
+    const d = new Date(raw);
+    if (!isNaN(d.getTime())) return d.getTime();
+    if (typeof raw === "string" && raw.includes("-")) {
+      const parts = raw.split("-");
+      if (parts.length === 3 && parts[0].length === 2) {
+        const [dd, mm, yyyy] = parts;
+        const parsed = new Date(`${yyyy}-${mm}-${dd}`);
+        if (!isNaN(parsed.getTime())) return parsed.getTime();
+      }
+    }
+    return 0;
+  };
 
-      // If url is a local public path (starts with /) and doesn't need auth, open directly
-      // But to ensure token is sent when backend requires it, fetch via api (axios)
-      const res = await api.get(url, { responseType: "blob", headers: { token } });
-      const blob = res.data;
-      const blobUrl = URL.createObjectURL(blob);
-      return { blobUrl, filename: extractFilenameFromUrl(url) || fallbackName, blob };
-    } catch (err) {
-      console.error("fetchFileBlobUrl error", err);
-      // Last-resort: if direct fetch fails and the url looks like local public file, try direct window.open
-      return null;
+  const resolveFileUrl = (url) => {
+    if (!url) return null;
+    try {
+      const s = String(url);
+      if (s.startsWith("http://") || s.startsWith("https://")) return s;
+      const base = api.defaults.baseURL || "";
+      try {
+        return new URL(s, base).toString();
+      } catch {
+        return s;
+      }
+    } catch {
+      return url;
     }
   };
 
   const extractFilenameFromUrl = (url) => {
+    if (!url) return null;
     try {
-      const parts = String(url).split("/");
-      return parts[parts.length - 1].split("?")[0];
+      return String(url).split("/").pop().split("?")[0] || null;
     } catch {
-      return "file";
+      return null;
+    }
+  };
+
+  const fetchFileBlobDirect = async (fileUrlOrPath) => {
+    try {
+      const resolved = resolveFileUrl(fileUrlOrPath) || DEMO_FALLBACK;
+      const res = await api.get(resolved, { responseType: "blob", headers: { token } });
+      const blob = res.data;
+      const blobUrl = URL.createObjectURL(blob);
+      const filename = extractFilenameFromUrl(resolved) || "file";
+      return { blob, blobUrl, filename };
+    } catch (err) {
+      console.warn("fetchFileBlobDirect failed:", err);
+      return { error: err };
+    }
+  };
+
+  
+  const fetchFileBlobViaProxy = async (fileUrlOrPath) => {
+    try {
+      const proxyBody = { path: String(fileUrlOrPath || "") };
+      const res = await api.post("/downloadDocument", proxyBody, { headers: { token }, responseType: "blob" });
+      const blob = res.data;
+      const blobUrl = URL.createObjectURL(blob);
+      const filename = extractFilenameFromUrl(proxyBody.path) || "file";
+      return { blob, blobUrl, filename };
+    } catch (err) {
+      console.warn("fetchFileBlobViaProxy failed:", err);
+      return { error: err };
     }
   };
 
   const handleView = async (row) => {
     setMessage(null);
-    // try common fields (adapt if API uses different key)
-    const url = row.document_url || row.file_url || row.file_path || row.document_path || row.fileUrl || null;
-    const maybe = await fetchFileBlobUrl(url, row.file_name || "document");
-    if (!maybe) {
-      setMessage({ type: "danger", text: "Unable to fetch preview for this file." });
+    const rawUrl = row.document_url || row.file_url || row.file_path || row.document_path || row.fileUrl || null;
+    const resolved = resolveFileUrl(rawUrl);
+
+    if (resolved) {
+      try {
+        window.open(resolved, "_blank", "noopener noreferrer");
+        return;
+      } catch (err) {
+        console.warn("window.open failed, falling back to proxy:", err);
+      }
+    }
+
+    const proxyMaybe = await fetchFileBlobViaProxy(rawUrl);
+    if (proxyMaybe && !proxyMaybe.error) {
+      const mime = proxyMaybe.blob.type || guessMimeFromName(proxyMaybe.filename);
+      if (mime.startsWith("image/")) {
+        setPreview({ open: true, url: proxyMaybe.blobUrl, type: "image" });
+        return;
+      } else if (mime === "application/pdf" || (proxyMaybe.filename || "").toLowerCase().endsWith(".pdf")) {
+        setPreview({ open: true, url: proxyMaybe.blobUrl, type: "pdf" });
+        return;
+      } else {
+        setPreview({ open: true, url: "", type: "unsupported" });
+        return;
+      }
+    }
+
+    setMessage({
+      type: "danger",
+      text:
+        "Unable to open preview. If the file is on S3 (presigned URL), it should open in a new tab. If it does not, implement a server-side proxy `/downloadDocument` to stream files.",
+    });
+  };
+
+  const handleDownloadSingle = async (row) => {
+    setMessage(null);
+    const rawUrl = row.document_url || row.file_url || row.file_path || row.document_path || row.fileUrl || null;
+    const resolved = resolveFileUrl(rawUrl);
+
+    if (resolved) {
+      try {
+        const a = document.createElement("a");
+        a.href = resolved;
+        a.target = "_blank";
+        a.rel = "noopener noreferrer";
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        return;
+      } catch (err) {
+        console.warn("anchor download failed, falling back to proxy:", err);
+        
+      }
+    }
+
+    const proxyMaybe = await fetchFileBlobViaProxy(rawUrl);
+    if (proxyMaybe && !proxyMaybe.error) {
+      saveAs(proxyMaybe.blob, proxyMaybe.filename);
       return;
     }
-    const mime = maybe.blob.type || guessMimeFromName(maybe.filename);
-    if (mime.startsWith("image/")) {
-      setPreview({ open: true, url: maybe.blobUrl, type: "image" });
-    } else if (mime === "application/pdf" || maybe.filename.toLowerCase().endsWith(".pdf")) {
-      setPreview({ open: true, url: maybe.blobUrl, type: "pdf" });
-    } else {
-      // unsupported: show message inside modal
-      setPreview({ open: true, url: "", type: "unsupported" });
-    }
+
+    setMessage({
+      type: "danger",
+      text:
+        "Download failed. For cross-origin files you can either open the presigned URL directly or implement a server-side proxy `/downloadDocument` to stream files to the browser.",
+    });
+    console.error("Download failed for row:", row);
   };
 
   const guessMimeFromName = (name) => {
@@ -135,61 +223,57 @@ export default function FileSearchAndList() {
     return "application/octet-stream";
   };
 
-  const handleDownloadSingle = async (row) => {
-    setMessage(null);
-    // similar to view but save file
-    const url = row.document_url || row.file_url || row.file_path || row.document_path || row.fileUrl || null;
-    try {
-      const maybe = await fetchFileBlobUrl(url, row.file_name || "document");
-      if (!maybe) {
-        setMessage({ type: "danger", text: "Download failed." });
-        return;
-      }
-      saveAs(maybe.blob, maybe.filename);
-    } catch (err) {
-      console.error("download single err", err);
-      setMessage({ type: "danger", text: "Download failed." });
-    }
-  };
-
-  // Download all visible rows as a zip
   const handleDownloadAllAsZip = async () => {
-    if (!rows.length) { setMessage({ type: "danger", text: "No files to download." }); return; }
+    if (!allRows.length) {
+      setMessage({ type: "danger", text: "No files to download." });
+      return;
+    }
     setMessage(null);
     try {
       const zip = new JSZip();
       let added = 0;
-      for (const r of rows) {
-        const url = r.document_url || r.file_url || r.file_path || r.document_path || r.fileUrl || null;
-        try {
-          const maybe = await fetchFileBlobUrl(url, r.file_name || `file_${added + 1}`);
-          if (maybe && maybe.blob) {
-            zip.file(maybe.filename, maybe.blob);
-            added++;
-          }
-        } catch (err) {
-          console.warn("skip file", err);
+      for (const r of allRows) {
+        const rawUrl = r.document_url || r.file_url || r.file_path || r.document_path || r.fileUrl || null;
+        const resolved = resolveFileUrl(rawUrl);
+        
+        let maybe = await fetchFileBlobDirect(rawUrl);
+        if (maybe && maybe.error) {
+          maybe = await fetchFileBlobViaProxy(rawUrl);
+        }
+        if (maybe && !maybe.error && maybe.blob) {
+          zip.file(maybe.filename, maybe.blob);
+          added++;
         }
       }
-      if (added === 0) { setMessage({ type: "danger", text: "No downloadable files found." }); return; }
-      const content = await zip.generateAsync({ type: "blob" }, (meta) => {
-        // optionally update progress: meta.percent
-      });
-      saveAs(content, `documents-${Date.now()}.zip`);
+      if (added === 0) {
+        setMessage({ type: "danger", text: "No downloadable files found or all downloads failed." });
+        return;
+      }
+      const blob = await zip.generateAsync({ type: "blob" });
+      saveAs(blob, `documents-${Date.now()}.zip`);
     } catch (err) {
       console.error("zip error", err);
       setMessage({ type: "danger", text: "Failed to create ZIP." });
     }
   };
 
-  const onSearchSubmit = (e) => {
-    e?.preventDefault();
-    setPageStart(0);
-    fetchDocs(0, pageLength);
+  const handleRefresh = () => {
+    setFilters({ major_head: "", minor_head: "", tagsText: "", from_date: "", to_date: "", searchText: "" });
+    fetchDocsAll();
   };
 
-  const guessDisplayFilename = (row) => {
-    return row.file_name || row.document_name || extractFilenameFromUrl(row.document_url || row.file_url || row.file_path || "") || "file";
+  const onSearchSubmit = (e) => {
+    e?.preventDefault();
+    fetchDocsAll();
+  };
+
+  const totalPages = Math.max(1, Math.ceil(allRows.length / PAGE_SIZE));
+  const gotoPage = (p) => {
+    const page = Math.max(1, Math.min(p, totalPages));
+    setCurrentPage(page);
+    const start = (page - 1) * PAGE_SIZE;
+    setPageRows(allRows.slice(start, start + PAGE_SIZE));
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   return (
@@ -197,84 +281,84 @@ export default function FileSearchAndList() {
       <div className="card shadow-sm">
         <div className="card-body">
 
-          <h5 className="mb-3">Search Documents</h5>
+          <div className="row mb-3">
+            <div className="col-12">
+              <h4 className="mb-0">Search Documents</h4>
+            </div>
+          </div>
 
-          {message && <div className={`alert alert-${message.type}`}>{message.text}</div>}
-
-          {/* Search form */}
-          <form className="row g-2 align-items-end mb-3" onSubmit={onSearchSubmit}>
-            <div className="col-md-2">
-              <label className="form-label small">Category</label>
-              <select className="form-select" value={filters.major_head} onChange={(e) => setFilters({...filters, major_head: e.target.value})}>
+          <form onSubmit={onSearchSubmit} className="row g-2 align-items-end">
+            <div className="col-auto">
+              <label className="form-label small mb-1">Category</label>
+              <select className="form-select form-select-sm" value={filters.major_head} onChange={(e) => setFilters({...filters, major_head: e.target.value})}>
                 <option value="">All</option>
                 <option value="Personal">Personal</option>
                 <option value="Professional">Professional</option>
               </select>
             </div>
 
-            <div className="col-md-2">
-              <label className="form-label small">{filters.major_head === "Professional" ? "Department" : "Name"}</label>
-              <input className="form-control" value={filters.minor_head} onChange={(e)=>setFilters({...filters, minor_head: e.target.value})} placeholder="Name/Department"/>
+            <div className="col-auto">
+              <label className="form-label small mb-1">Name/Department</label>
+              <input className="form-control form-control-sm" placeholder="Name/Dept" value={filters.minor_head} onChange={(e) => setFilters({...filters, minor_head: e.target.value})} />
             </div>
 
-            <div className="col-md-2">
-              <label className="form-label small">Tags (comma separated)</label>
-              <input className="form-control" value={filters.tagsText} onChange={(e)=>setFilters({...filters, tagsText: e.target.value})} placeholder="invoice, id"/>
+            <div className="col-auto" style={{ minWidth: 220 }}>
+              <label className="form-label small mb-1">Tags</label>
+              <input className="form-control form-control-sm" placeholder="invoice, RMC" value={filters.tagsText} onChange={(e) => setFilters({...filters, tagsText: e.target.value})} />
             </div>
 
-            <div className="col-md-2">
-              <label className="form-label small">From</label>
-              <input type="date" className="form-control" value={filters.from_date} onChange={(e)=>setFilters({...filters, from_date: e.target.value})}/>
+            <div className="col-auto">
+              <label className="form-label small mb-1">From</label>
+              <input type="date" className="form-control form-control-sm" value={filters.from_date} onChange={(e) => setFilters({...filters, from_date: e.target.value})} />
             </div>
 
-            <div className="col-md-2">
-              <label className="form-label small">To</label>
-              <input type="date" className="form-control" value={filters.to_date} onChange={(e)=>setFilters({...filters, to_date: e.target.value})}/>
+            <div className="col-auto">
+              <label className="form-label small mb-1">To</label>
+              <input type="date" className="form-control form-control-sm" value={filters.to_date} onChange={(e) => setFilters({...filters, to_date: e.target.value})} />
             </div>
 
-            <div className="col-md-2">
-              <label className="form-label small">Search</label>
-              <div className="d-flex">
-                <input className="form-control me-2" placeholder="free text" value={filters.searchText} onChange={(e)=>setFilters({...filters, searchText: e.target.value})}/>
-                <button className="btn btn-primary" type="submit">Search</button>
-              </div>
+            <div className="col-auto" style={{ minWidth: 200 }}>
+              <label className="form-label small mb-1">Search</label>
+              <input className="form-control form-control-sm" placeholder="free text" value={filters.searchText} onChange={(e)=>setFilters({...filters, searchText: e.target.value})} />
             </div>
           </form>
 
-          {/* Actions */}
-          <div className="mb-3 d-flex justify-content-end">
-            <button className="btn btn-outline-secondary me-2" onClick={() => fetchDocs(0, pageLength)}>Refresh</button>
-            <button className="btn btn-outline-success" onClick={handleDownloadAllAsZip}>Download All as ZIP</button>
+          <div className="row mt-3">
+            <div className="col-12 d-flex justify-content-end gap-2">
+              <button className="btn btn-sm btn-primary" onClick={onSearchSubmit}>Search</button>
+              <button className="btn btn-sm btn-outline-secondary" onClick={handleRefresh}>Refresh</button>
+            </div>
           </div>
 
-          {/* Results table */}
-          <div className="table-responsive">
-            <table className="table table-striped table-sm align-middle">
+          {message && <div className={`alert alert-${message.type} mt-3`}>{message.text}</div>}
+
+          <div className="table-responsive mt-3">
+            <table className="table table-striped table-sm">
               <thead>
                 <tr>
-                  <th>#</th>
+                  <th style={{width:40}}>#</th>
                   <th>Date</th>
                   <th>Major</th>
                   <th>Minor</th>
                   <th>Remarks</th>
                   <th>Tags</th>
                   <th>Uploaded By</th>
-                  <th style={{ minWidth: 160 }}>Actions</th>
+                  <th style={{ minWidth: 180 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {loading ? (
                   <tr><td colSpan="8" className="text-center py-4">Loading...</td></tr>
-                ) : rows.length === 0 ? (
+                ) : pageRows.length === 0 ? (
                   <tr><td colSpan="8" className="text-center py-4">No documents found.</td></tr>
-                ) : rows.map((r, i) => {
+                ) : pageRows.map((r, i) => {
                   const date = r.document_date || r.documentDate || r.created_at || "";
                   const tags = r.tags || r.tag || [];
-                  const tagText = Array.isArray(tags) ? tags.map(t => t.tag_name || t).join(", ") : String(tags);
+                  const tagText = Array.isArray(tags) ? tags.map(t => t.tag_name || t.label || t).join(", ") : String(tags);
 
                   return (
                     <tr key={i}>
-                      <td>{pageStart + i + 1}</td>
+                      <td>{(currentPage - 1) * PAGE_SIZE + i + 1}</td>
                       <td style={{ whiteSpace: "nowrap" }}>{date}</td>
                       <td>{r.major_head || r.major || ""}</td>
                       <td>{r.minor_head || r.minor || r.department || ""}</td>
@@ -283,8 +367,12 @@ export default function FileSearchAndList() {
                       <td>{r.user_id || r.uploaded_by || ""}</td>
                       <td>
                         <div className="btn-group" role="group">
-                          <button className="btn btn-sm btn-outline-primary" onClick={() => handleView(r)}>View</button>
-                          <button className="btn btn-sm btn-outline-success" onClick={() => handleDownloadSingle(r)}>Download</button>
+                          <button className="btn btn-sm btn-outline-dark" onClick={() => handleView(r)} title="View">
+                            View
+                          </button>
+                          <button className="btn btn-sm btn-outline-success" onClick={() => handleDownloadSingle(r)} title="Download">
+                            Download
+                          </button>
                         </div>
                       </td>
                     </tr>
@@ -294,10 +382,39 @@ export default function FileSearchAndList() {
             </table>
           </div>
 
+          <div className="d-flex justify-content-end align-items-center mt-3">
+            <nav>
+              <ul className="pagination pagination-sm mb-0">
+                <li className={`page-item ${currentPage === 1 ? "disabled" : ""}`}>
+                  <button className="page-link" onClick={() => gotoPage(currentPage - 1)}>Previous</button>
+                </li>
+
+                {Array.from({ length: totalPages }).map((_, idx) => {
+                  const p = idx + 1;
+                  const show = Math.abs(p - currentPage) <= 2 || p === 1 || p === totalPages;
+                  if (!show) {
+                    if (p === currentPage - 3 || p === currentPage + 3) {
+                      return (<li key={`ell-${p}`} className="page-item disabled"><span className="page-link">...</span></li>);
+                    }
+                    return null;
+                  }
+                  return (
+                    <li key={p} className={`page-item ${p === currentPage ? "active" : ""}`}>
+                      <button className="page-link" onClick={() => gotoPage(p)}>{p}</button>
+                    </li>
+                  );
+                })}
+
+                <li className={`page-item ${currentPage === totalPages ? "disabled" : ""}`}>
+                  <button className="page-link" onClick={() => gotoPage(currentPage + 1)}>Next</button>
+                </li>
+              </ul>
+            </nav>
+          </div>
+
         </div>
       </div>
 
-      {/* Preview modal (simple) */}
       {preview.open && (
         <div className="modal show d-block" tabIndex="-1" role="dialog" onClick={() => setPreview({open:false, url:"", type:""})}>
           <div className="modal-dialog modal-xl" role="document" onClick={(e) => e.stopPropagation()}>
@@ -322,6 +439,7 @@ export default function FileSearchAndList() {
           </div>
         </div>
       )}
+
     </div>
   );
 }

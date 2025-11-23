@@ -1,7 +1,7 @@
 // src/pages/dashboard/DashboardShell.jsx
 import React from "react";
 import { NavLink, Outlet, useNavigate } from "react-router-dom";
-import "../../assets/css/dashboard-shell.css"; // correct based on your project
+import "../../assets/css/dashboard-shell.css";
 
 import logoUrl from "../../assets/images/pngegg.png";
 
