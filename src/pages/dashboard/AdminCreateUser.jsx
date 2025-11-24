@@ -96,13 +96,14 @@ export default function AdminCreateUser() {
 
   return (
     <div
-      className="d-flex justify-content-center align-items-center"
+      className="d-flex justify-content-center"
       style={{ minHeight: "100vh", background: "#f5f7fa" }}
     >
       <div style={{ width: "850px" }}>
         <div className="text-center mb-4">
           <h2 className="mt-3">Admin – Create User</h2>
         </div>
+
 
         <div className="card shadow-sm mb-4">
           <div className="card-body p-4">
